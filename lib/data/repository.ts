@@ -3,8 +3,9 @@ import { CLOSED_STATUSES } from "@/lib/constants";
 import { isDemoSession } from "@/lib/mode";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { supabaseConfigured } from "@/lib/supabase/env";
-import type { JournalFilters, JournalTab, Playbook, PlaybookSnapshot, SessionUser, SymbolRow, Trade, TradingAccount } from "@/lib/types";
-import { playbookActiveSchema, tradeSchema, type AccountInput, type PlaybookDraftInput } from "@/lib/validations";
+import { APPLY_FX_CONVERSION } from "@/lib/config";
+import type { JournalFilters, JournalTab, Playbook, PlaybookSnapshot, SessionUser, SymbolRow, Trade, TradeImage, TradeImageKind, TradeReview, TradingAccount } from "@/lib/types";
+import { playbookActiveSchema, reviewSchema, tradeSchema, type AccountInput, type PlaybookDraftInput, type ReviewInput } from "@/lib/validations";
 import { mapAccount, mapPlaybook, mapPlaybookImage, mapSymbol, mapTrade, toSnapshot } from "./mappers";
 import { demoUserId, readDemoState, writeDemoState } from "./demo-store";
 
@@ -395,8 +396,11 @@ export async function listTrades(tab: JournalTab, filters: JournalFilters = {}):
     return state.trades
       .map((trade) => ({
         ...trade,
+        notes: trade.notes ?? null,
         account: state.accounts.find((account) => account.id === trade.accountId) ?? null,
         symbol: state.symbols.find((symbol) => symbol.id === trade.symbolId) ?? null,
+        images: state.tradeImages.filter((image) => image.tradeId === trade.id),
+        review: state.reviews.find((review) => review.tradeId === trade.id) ?? null,
       }))
       .filter((trade) => matchesJournal(trade, tab, filters))
       .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
@@ -419,7 +423,7 @@ export async function listTrades(tab: JournalTab, filters: JournalFilters = {}):
 
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? [])
+  const trades = (data ?? [])
     .map((row) =>
       mapTrade(row, {
         account: row.trading_accounts ? mapAccount(row.trading_accounts as Record<string, unknown>) : null,
@@ -427,6 +431,7 @@ export async function listTrades(tab: JournalTab, filters: JournalFilters = {}):
       }),
     )
     .filter((trade) => !filters.assetClass || trade.symbol?.assetClass === filters.assetClass);
+  return hydrateTradeExtras(trades);
 }
 
 export async function countTradesByTab() {
@@ -442,8 +447,11 @@ export async function getTrade(id: string) {
     if (!trade) return null;
     return {
       ...trade,
+      notes: trade.notes ?? null,
       account: state.accounts.find((account) => account.id === trade.accountId) ?? null,
       symbol: state.symbols.find((symbol) => symbol.id === trade.symbolId) ?? null,
+      images: state.tradeImages.filter((image) => image.tradeId === trade.id),
+      review: state.reviews.find((review) => review.tradeId === trade.id) ?? null,
     };
   }
   const supabase = await createServerSupabase();
@@ -454,10 +462,12 @@ export async function getTrade(id: string) {
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return mapTrade(data, {
+  const trade = mapTrade(data, {
     account: data.trading_accounts ? mapAccount(data.trading_accounts as Record<string, unknown>) : null,
     symbol: data.symbols ? mapSymbol(data.symbols as Record<string, unknown>) : null,
   });
+  const [images, review] = await Promise.all([listTradeImages(id), getReview(id)]);
+  return { ...trade, images: await signTradeImages(images), review };
 }
 
 export async function saveTrade(id: string | null, raw: unknown) {
@@ -467,8 +477,11 @@ export async function saveTrade(id: string | null, raw: unknown) {
     listAccounts().then((rows) => rows.find((row) => row.id === parsed.accountId) ?? null),
     listSymbols(),
   ]);
-  if (!playbook) throw new Error("Playbook not found");
-  if (playbook.usageStatus !== "live") throw new Error("Only a Live playbook can be used for a new trade");
+  const existing = id ? await getTrade(id) : null;
+  if (!playbook && !existing?.playbookSnapshot) throw new Error("Playbook not found");
+  if (!existing && playbook?.usageStatus !== "live") {
+    throw new Error("Only a Live playbook can be used for a new trade");
+  }
   if (!account) throw new Error("Account not found");
   const symbol = symbols.find((row) => row.id === parsed.symbolId);
   if (!symbol) throw new Error("Symbol not found");
@@ -478,6 +491,7 @@ export async function saveTrade(id: string | null, raw: unknown) {
   const exitPrice =
     parsed.status === "trade_sl_hit" ? (parsed.exitPrice ?? parsed.stopLoss) : (parsed.exitPrice ?? null);
   const closed = CLOSED_STATUSES.includes(parsed.status as (typeof CLOSED_STATUSES)[number]);
+  const fx = APPLY_FX_CONVERSION ? 1 : 1;
   const metrics = computeTradeMetrics({
     entry: parsed.entry,
     stopLoss: parsed.stopLoss,
@@ -486,10 +500,9 @@ export async function saveTrade(id: string | null, raw: unknown) {
     direction: parsed.direction,
     quantity: parsed.quantity,
     contractSize: symbol.contractSize,
-    fx: symbol.calcCurrency === account.currency ? 1 : symbol.code === "GBPAUD" ? 0.7 : 1,
+    fx,
   });
-  const snapshot: PlaybookSnapshot = toSnapshot(playbook);
-  const fx = symbol.calcCurrency === account.currency ? 1 : symbol.code === "GBPAUD" ? 0.7 : 1;
+  const snapshot: PlaybookSnapshot = existing?.playbookSnapshot ?? toSnapshot(playbook!);
 
   if (await isDemoSession()) {
     const state = readDemoState();
@@ -497,7 +510,7 @@ export async function saveTrade(id: string | null, raw: unknown) {
       id: id ?? newId(),
       userId: demoUserId(),
       accountId: account.id,
-      playbookId: playbook.id,
+      playbookId: playbook?.id ?? existing?.playbookId ?? parsed.playbookId,
       playbookSnapshot: snapshot,
       symbolId: symbol.id,
       direction: parsed.direction,
@@ -517,10 +530,13 @@ export async function saveTrade(id: string | null, raw: unknown) {
       plannedRr: metrics.plannedRr,
       actualRr: metrics.actualRr,
       pnlGross: metrics.pnlGross,
-      reasoning: parsed.reasoning ?? null,
+      reasoning: parsed.reasoning ?? existing?.reasoning ?? null,
+      notes: parsed.notes ?? existing?.notes ?? null,
       openedAt: new Date(parsed.openedAt).toISOString(),
       closedAt: closed ? new Date(parsed.closedAt || Date.now()).toISOString() : null,
-      closingEvidencePath: null,
+      closingEvidencePath: existing?.closingEvidencePath ?? null,
+      images: existing?.images ?? [],
+      review: existing?.review ?? null,
       createdAt: nowIso(),
       updatedAt: nowIso(),
       account,
@@ -536,7 +552,7 @@ export async function saveTrade(id: string | null, raw: unknown) {
   const supabase = await createServerSupabase();
   const row = {
     account_id: account.id,
-    playbook_id: playbook.id,
+    playbook_id: playbook?.id ?? existing?.playbookId ?? parsed.playbookId,
     playbook_snapshot: snapshot,
     symbol_id: symbol.id,
     direction: parsed.direction,
@@ -554,6 +570,7 @@ export async function saveTrade(id: string | null, raw: unknown) {
     contract_size_used: symbol.contractSize,
     fx_rate_used: fx,
     reasoning: parsed.reasoning ?? null,
+    notes: parsed.notes ?? null,
     opened_at: new Date(parsed.openedAt).toISOString(),
     closed_at: closed ? new Date(parsed.closedAt || Date.now()).toISOString() : null,
   };
@@ -575,6 +592,176 @@ export async function deleteTrade(id: string) {
   const supabase = await createServerSupabase();
   const { error } = await supabase.from("trades").delete().eq("id", id);
   if (error) throw error;
+}
+
+async function hydrateTradeExtras(trades: Trade[]): Promise<Trade[]> {
+  if (!trades.length || (await isDemoSession())) return trades;
+  const supabase = await createServerSupabase();
+  const ids = trades.map((trade) => trade.id);
+  const [{ data: images }, { data: reviews }] = await Promise.all([
+    supabase.from("trade_images").select("*").in("trade_id", ids),
+    supabase.from("trade_reviews").select("*").in("trade_id", ids),
+  ]);
+  const mappedImages = await signTradeImages((images ?? []).map((row) => mapTradeImage(row)));
+  const mappedReviews = (reviews ?? []).map((row) => mapReview(row));
+  return trades.map((trade) => ({
+    ...trade,
+    images: mappedImages.filter((image) => image.tradeId === trade.id),
+    review: mappedReviews.find((review) => review.tradeId === trade.id) ?? null,
+  }));
+}
+
+async function signTradeImages(images: TradeImage[]): Promise<TradeImage[]> {
+  const paths = images.filter((image) => !image.storagePath.startsWith("data:"));
+  if (!paths.length || (await isDemoSession())) {
+    return images.map((image) => ({ ...image, signedUrl: image.signedUrl ?? image.storagePath }));
+  }
+  const supabase = await createServerSupabase();
+  const tradePaths = paths.filter((image) => image.kind !== "closing").map((image) => image.storagePath);
+  const closingPaths = paths.filter((image) => image.kind === "closing").map((image) => image.storagePath);
+  const [tradeSigned, closingSigned] = await Promise.all([
+    tradePaths.length ? supabase.storage.from("trade-images").createSignedUrls(tradePaths, 3600) : { data: [] },
+    closingPaths.length ? supabase.storage.from("closing-evidence").createSignedUrls(closingPaths, 3600) : { data: [] },
+  ]);
+  const urlMap = new Map(
+    [...(tradeSigned.data ?? []), ...(closingSigned.data ?? [])].map((item) => [item.path, item.signedUrl] as const),
+  );
+  return images.map((image) => ({
+    ...image,
+    signedUrl: urlMap.get(image.storagePath) ?? image.storagePath,
+  }));
+}
+
+function mapReview(row: Record<string, unknown>): TradeReview {
+  return {
+    tradeId: String(row.trade_id),
+    userId: String(row.user_id),
+    checklist: (row.checklist as TradeReview["checklist"]) ?? [],
+    emotions: (row.emotions as string[]) ?? [],
+    mistakes: (row.mistakes as string[]) ?? [],
+    lessons: (row.lessons as string) ?? "",
+    rating: row.rating == null ? null : Number(row.rating),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapTradeImage(row: Record<string, unknown>): TradeImage {
+  return {
+    id: String(row.id),
+    tradeId: String(row.trade_id),
+    kind: row.kind as TradeImageKind,
+    storagePath: String(row.storage_path),
+  };
+}
+
+export async function listAllTrades(): Promise<Trade[]> {
+  const [open, closed, missed, cancelled] = await Promise.all([
+    listTrades("open"),
+    listTrades("closed"),
+    listTrades("missed"),
+    listTrades("cancelled"),
+  ]);
+  return [...open, ...closed, ...missed, ...cancelled];
+}
+
+export async function listReviews(): Promise<TradeReview[]> {
+  if (await isDemoSession()) {
+    return readDemoState().reviews;
+  }
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase.from("trade_reviews").select("*");
+  if (error) throw error;
+  return (data ?? []).map((row) => mapReview(row));
+}
+
+export async function getReview(tradeId: string) {
+  const reviews = await listReviews();
+  return reviews.find((review) => review.tradeId === tradeId) ?? null;
+}
+
+export async function saveReview(input: ReviewInput) {
+  const parsed = reviewSchema.parse(input);
+  const user = await currentUser();
+  if (!user) throw new Error("Sign in first");
+  const review: TradeReview = {
+    tradeId: parsed.tradeId,
+    userId: user.id,
+    checklist: parsed.checklist,
+    emotions: parsed.emotions,
+    mistakes: parsed.mistakes,
+    lessons: parsed.lessons ?? "",
+    rating: parsed.rating ?? null,
+    updatedAt: nowIso(),
+  };
+  if (await isDemoSession()) {
+    const state = readDemoState();
+    const index = state.reviews.findIndex((row) => row.tradeId === review.tradeId);
+    if (index >= 0) state.reviews[index] = review;
+    else state.reviews.push(review);
+    writeDemoState(state);
+    return review;
+  }
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("trade_reviews")
+    .upsert({
+      trade_id: review.tradeId,
+      user_id: user.id,
+      checklist: review.checklist,
+      emotions: review.emotions,
+      mistakes: review.mistakes,
+      lessons: review.lessons,
+      rating: review.rating,
+      updated_at: review.updatedAt,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapReview(data);
+}
+
+export async function listUnreviewedClosedTrades() {
+  const [closed, reviews] = await Promise.all([listTrades("closed"), listReviews()]);
+  const reviewed = new Set(reviews.map((review) => review.tradeId));
+  return closed.filter((trade) => !reviewed.has(trade.id));
+}
+
+export async function listTradeImages(tradeId: string) {
+  if (await isDemoSession()) {
+    return readDemoState().tradeImages.filter((image) => image.tradeId === tradeId);
+  }
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase.from("trade_images").select("*").eq("trade_id", tradeId);
+  if (error) throw error;
+  return (data ?? []).map((row) => mapTradeImage(row));
+}
+
+export async function addTradeImage(tradeId: string, kind: TradeImageKind, storagePath: string) {
+  const limits = { setup: 2, reference: 5, closing: 1 };
+  if (await isDemoSession()) {
+    const state = readDemoState();
+    const current = state.tradeImages.filter((image) => image.tradeId === tradeId && image.kind === kind);
+    if (current.length >= limits[kind]) throw new Error(`A trade can have at most ${limits[kind]} ${kind} image(s)`);
+    const image: TradeImage = { id: newId(), tradeId, kind, storagePath };
+    state.tradeImages.push(image);
+    if (kind === "closing") {
+      const trade = state.trades.find((row) => row.id === tradeId);
+      if (trade) trade.closingEvidencePath = storagePath;
+    }
+    writeDemoState(state);
+    return image;
+  }
+  const supabase = await createServerSupabase();
+  const { data, error } = await supabase
+    .from("trade_images")
+    .insert({ trade_id: tradeId, kind, storage_path: storagePath })
+    .select("*")
+    .single();
+  if (error) throw error;
+  if (kind === "closing") {
+    await supabase.from("trades").update({ closing_evidence_path: storagePath }).eq("id", tradeId);
+  }
+  return mapTradeImage(data);
 }
 
 export async function dashboardStats() {

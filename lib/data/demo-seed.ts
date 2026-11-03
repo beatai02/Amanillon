@@ -1,5 +1,5 @@
 import { computeTradeMetrics } from "@/lib/calc";
-import type { Playbook, SymbolRow, Trade, TradingAccount } from "@/lib/types";
+import type { Playbook, SymbolRow, Trade, TradeReview, TradingAccount } from "@/lib/types";
 
 export const DEMO_USER_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -116,7 +116,7 @@ export const DEMO_PLAYBOOKS: Playbook[] = [
   },
 ];
 
-function tradeFrom(partial: Omit<Trade, "plannedRr" | "actualRr" | "pnlGross" | "playbookSnapshot" | "createdAt" | "updatedAt"> & { playbook: Playbook }): Trade {
+function tradeFrom(partial: Omit<Trade, "plannedRr" | "actualRr" | "pnlGross" | "playbookSnapshot" | "createdAt" | "updatedAt" | "notes" | "images" | "review"> & { playbook: Playbook; notes?: string | null }): Trade {
   const metrics = computeTradeMetrics({
     entry: partial.entry,
     stopLoss: partial.stopLoss,
@@ -150,6 +150,7 @@ function tradeFrom(partial: Omit<Trade, "plannedRr" | "actualRr" | "pnlGross" | 
       prepStatus: playbook.prepStatus,
       usageStatus: playbook.usageStatus,
     },
+    notes: rest.notes ?? null,
     plannedRr: metrics.plannedRr,
     actualRr: metrics.actualRr,
     pnlGross: metrics.pnlGross,
@@ -182,7 +183,7 @@ export const DEMO_TRADES: Trade[] = [
     riskValue: 2,
     riskAmount: 2000,
     contractSizeUsed: 100000,
-    fxRateUsed: 0.7,
+    fxRateUsed: 1,
     reasoning: "Daily supply sweep into a clean demand hold.",
     openedAt: "2026-10-12T07:30:00.000Z",
     closedAt: "2026-10-14T11:15:00.000Z",
@@ -302,4 +303,79 @@ export const DEMO_TRADES: Trade[] = [
     account: DEMO_ACCOUNTS[1],
     symbol: DEMO_SYMBOLS.find((s) => s.id === "sym-usdjpy") ?? null,
   }),
+  tradeFrom({
+    id: "tr-loss",
+    userId: DEMO_USER_ID,
+    accountId: primary.id,
+    playbookId: live.id,
+    playbook: live,
+    symbolId: "sym-xauusd",
+    direction: "short",
+    status: "trade_sl_hit",
+    htf: ["D"],
+    entryTf: ["H1"],
+    entry: 2650,
+    stopLoss: 2665,
+    takeProfit: 2610,
+    exitPrice: 2665,
+    quantity: 0.2,
+    riskMode: "percent",
+    riskValue: 1,
+    riskAmount: 1000,
+    contractSizeUsed: 100,
+    fxRateUsed: 1,
+    reasoning: "Stopped when the daily close held above supply.",
+    openedAt: "2026-10-24T13:10:00.000Z",
+    closedAt: "2026-10-24T15:40:00.000Z",
+    closingEvidencePath: null,
+    account: primary,
+    symbol: DEMO_SYMBOLS.find((s) => s.id === "sym-xauusd") ?? null,
+  }),
+  tradeFrom({
+    id: "tr-revenge",
+    userId: DEMO_USER_ID,
+    accountId: primary.id,
+    playbookId: live.id,
+    playbook: live,
+    symbolId: "sym-xauusd",
+    direction: "long",
+    status: "trade_exit_in_mid",
+    htf: ["D"],
+    entryTf: ["H1"],
+    entry: 2666,
+    stopLoss: 2658,
+    takeProfit: 2688,
+    exitPrice: 2669,
+    quantity: 0.3,
+    riskMode: "percent",
+    riskValue: 2,
+    riskAmount: 2000,
+    contractSizeUsed: 100,
+    fxRateUsed: 1,
+    reasoning: "Re-entered too quickly after the gold stop.",
+    openedAt: "2026-10-24T15:50:00.000Z",
+    closedAt: "2026-10-24T16:20:00.000Z",
+    closingEvidencePath: null,
+    notes: "Opened 10 minutes after the gold loss.",
+    account: primary,
+    symbol: DEMO_SYMBOLS.find((s) => s.id === "sym-xauusd") ?? null,
+  }),
+];
+
+export const DEMO_REVIEWS: TradeReview[] = [
+  {
+    tradeId: "tr-gbpaud",
+    userId: DEMO_USER_ID,
+    checklist: [
+      { id: "line-0", label: "Mark daily supply, wait for a sweep and a rejection close.", followed: true },
+      { id: "entry", label: "Enter after a displacement candle away from the swept supply.", followed: true },
+      { id: "exit", label: "Scale at 1R, remainder to the next daily demand.", followed: true },
+      { id: "sl", label: "Move to breakeven after 1R, trail under the last higher-low.", followed: true },
+    ],
+    emotions: ["Confidence"],
+    mistakes: [],
+    lessons: "The sweep needed a full close, not just a wick.",
+    rating: 5,
+    updatedAt: "2026-10-14T18:00:00.000Z",
+  },
 ];

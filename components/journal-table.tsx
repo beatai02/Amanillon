@@ -10,7 +10,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Eye, Pencil, Trash2 } from "lucide-react";
+import { ClipboardCheck, Eye, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui";
@@ -103,16 +103,38 @@ export function JournalTable({
         accessorKey: "status",
         cell: ({ row }) => <Badge tone={statusTone(row.original.status)}>{TRADE_STATUS_LABELS[row.original.status]}</Badge>,
       },
-      { header: "Closed Evidence", cell: () => "—" },
+      {
+        header: "Closed Evidence",
+        cell: ({ row }) => {
+          const closing =
+            row.original.images?.find((image) => image.kind === "closing") ??
+            (row.original.closingEvidencePath
+              ? { signedUrl: row.original.closingEvidencePath, storagePath: row.original.closingEvidencePath }
+              : null);
+          if (!closing) return "—";
+          const src = closing.signedUrl ?? closing.storagePath;
+          if (src.startsWith("data:") || src.startsWith("http")) {
+            return <img src={src} alt="" className="h-10 w-14 rounded object-cover" />;
+          }
+          return "Attached";
+        },
+      },
       {
         header: "Actions",
         cell: ({ row }) => (
           <div className="flex items-center gap-2">
-            <Link href={`/app/journal/${row.original.id}`} className="text-slate-500 hover:text-slate-800">
+            <Link href={`/app/journal/${row.original.id}`} className="text-slate-500 hover:text-slate-800" title="View">
               <Eye className="size-4" />
             </Link>
-            <Link href={`/app/journal/${row.original.id}/edit`} className="text-slate-500 hover:text-slate-800">
+            <Link href={`/app/journal/${row.original.id}/edit`} className="text-slate-500 hover:text-slate-800" title="Edit">
               <Pencil className="size-4" />
+            </Link>
+            <Link
+              href={`/app/journal/${row.original.id}/review`}
+              className="text-slate-500 hover:text-slate-800"
+              title={row.original.review ? "Edit review" : "Review"}
+            >
+              <ClipboardCheck className={`size-4 ${row.original.review ? "text-emerald-600" : ""}`} />
             </Link>
             <button
               type="button"

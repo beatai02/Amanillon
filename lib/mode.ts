@@ -6,6 +6,7 @@ export function demoModeEnabled() {
 }
 
 export async function isDemoSession() {
+  if (!demoModeEnabled()) return false;
   const store = await cookies();
   return store.get(DEMO_COOKIE)?.value === "1";
 }

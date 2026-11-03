@@ -13,7 +13,7 @@ export default function SignupPage() {
   return (
     <AuthShell
       title="Create your journal"
-      subtitle="Email sign-up. You will confirm the inbox before the first sign-in if the project requires it."
+      subtitle="Open email sign-up. Confirm the inbox before the first sign-in."
       footer={
         <>
           Already have an account?{" "}

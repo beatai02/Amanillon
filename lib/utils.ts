@@ -41,3 +41,14 @@ export function titleCase(value: string) {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
+
+export function formatPct(value: number | null | undefined, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+export function formatR(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  const formatted = formatNumber(value, 2);
+  return value > 0 ? `+${formatted}R` : `${formatted}R`;
+}

@@ -120,6 +120,7 @@ export function mapTrade(
     actualRr: row.actual_rr == null ? null : Number(row.actual_rr),
     pnlGross: row.pnl_gross == null ? null : Number(row.pnl_gross),
     reasoning: (row.reasoning as string) ?? null,
+    notes: (row.notes as string) ?? null,
     openedAt: String(row.opened_at),
     closedAt: row.closed_at ? String(row.closed_at) : null,
     closingEvidencePath: row.closing_evidence_path ? String(row.closing_evidence_path) : null,

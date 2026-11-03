@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, LayoutDashboard, LineChart, NotebookPen, UserRound } from "lucide-react";
+import { BookOpen, ClipboardCheck, LayoutDashboard, LineChart, NotebookPen, UserRound } from "lucide-react";
 import { BrandLogo } from "@/components/brand-logo";
 import { signOutAction } from "@/lib/actions/auth";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/app", label: "Home", icon: LayoutDashboard },
   { href: "/app/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/app/journal", label: "Journal", icon: NotebookPen },
+  { href: "/app/reviews", label: "Reviews", icon: ClipboardCheck },
   { href: "/app/insights", label: "Insights", icon: LineChart },
 ];
 

@@ -130,6 +130,7 @@ export const tradeSchema = z
     riskMode: z.enum(RISK_MODES),
     riskValue: z.coerce.number().positive("Risk value is required"),
     reasoning: z.string().optional(),
+    notes: z.string().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.entry === value.stopLoss) {
@@ -156,5 +157,21 @@ export const tradeSchema = z
 export type AccountInput = z.infer<typeof accountSchema>;
 export type PlaybookActiveInput = z.infer<typeof playbookActiveSchema>;
 export type PlaybookDraftInput = z.infer<typeof playbookDraftSchema>;
+export const reviewSchema = z.object({
+  tradeId: z.string().min(1),
+  checklist: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      followed: z.boolean(),
+    }),
+  ),
+  emotions: z.array(z.string()).default([]),
+  mistakes: z.array(z.string()).default([]),
+  lessons: z.string().optional().default(""),
+  rating: z.coerce.number().min(1).max(5).nullable().optional(),
+});
+
 export type TradeInput = z.infer<typeof tradeSchema>;
+export type ReviewInput = z.infer<typeof reviewSchema>;
 export const extraConfluences = CONFLUENCES;

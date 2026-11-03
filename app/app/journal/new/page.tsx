@@ -12,7 +12,7 @@ export default async function NewTradePage() {
     <div>
       <h1 className="mb-2 text-3xl font-semibold">New trade</h1>
       <p className="mb-6 text-sm text-slate-500">
-        Pick a Live playbook. Levels and risk stay editable; the suggested lot size is a helper.
+        Pick a Live playbook. The suggested lot size recalculates when entry or stop changes. P&amp;L stays in the account currency.
       </p>
       <TradeForm playbooks={playbooks} accounts={accounts} symbols={symbols} />
     </div>

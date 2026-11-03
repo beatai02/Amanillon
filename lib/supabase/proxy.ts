@@ -1,13 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { DEMO_COOKIE } from "@/lib/constants";
+import { demoModeEnabled } from "@/lib/mode";
 import { supabaseAnonKey, supabaseConfigured, supabaseUrl } from "./env";
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
   const pathname = request.nextUrl.pathname;
   const isApp = pathname.startsWith("/app");
-  const isDemo = request.cookies.get(DEMO_COOKIE)?.value === "1";
+  const isDemo = demoModeEnabled() && request.cookies.get(DEMO_COOKIE)?.value === "1";
 
   if (isDemo) {
     if (pathname === "/login" || pathname === "/signup" || pathname === "/") {

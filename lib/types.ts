@@ -121,6 +121,7 @@ export type Trade = {
   actualRr: number | null;
   pnlGross: number | null;
   reasoning: string | null;
+  notes: string | null;
   openedAt: string;
   closedAt: string | null;
   closingEvidencePath: string | null;
@@ -128,6 +129,35 @@ export type Trade = {
   updatedAt: string;
   account?: TradingAccount | null;
   symbol?: SymbolRow | null;
+  images?: TradeImage[];
+  review?: TradeReview | null;
+};
+
+export type TradeImageKind = "setup" | "reference" | "closing";
+
+export type TradeImage = {
+  id: string;
+  tradeId: string;
+  kind: TradeImageKind;
+  storagePath: string;
+  signedUrl?: string | null;
+};
+
+export type ChecklistItem = {
+  id: string;
+  label: string;
+  followed: boolean;
+};
+
+export type TradeReview = {
+  tradeId: string;
+  userId: string;
+  checklist: ChecklistItem[];
+  emotions: string[];
+  mistakes: string[];
+  lessons: string;
+  rating: number | null;
+  updatedAt: string;
 };
 
 export type JournalTab = "open" | "closed" | "missed" | "cancelled";
